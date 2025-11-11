@@ -32,3 +32,5 @@ Cria arquivo named.conf.local (define a zona gabriel.local)
 Cria arquivo de zona com registros DNS (ns1, www)
 Valida a configuração com named-checkzone
 Reinicia o Bind9
+
+chmod +x script-completo.sh
