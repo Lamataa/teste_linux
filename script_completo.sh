@@ -8,9 +8,9 @@
 # Para o script em caso de erro
 set -e
 
-# Variáveis do script
+# Variáveis do script - PARA MUDAR O IP, ALTERE AQUI:
 DOMAIN="gabriel.local"
-IP="192.168.56.20"
+IP="192.168.56.20"              # <-- MUDE AQUI se precisar de outro IP
 IFACE1="enp0s3"
 IFACE2="enp0s8"
 ZONE_FILE="/var/cache/bind/gabriel.local.zone"
