@@ -70,16 +70,17 @@ echo "[REDE] Verificando conectividade com a internet..."
 sleep 1
 
 if ! ping -c 2 8.8.8.8 &> /dev/null; then
-    echo "[AVISO] Sem conectividade com a internet."
-    echo "Tentando configurar rota padrão via enp0s3..."
+    echo "[AVISO] Sem conectividade detectada. Tentando adicionar rota padrão..."
     ip route add default via 10.0.2.2 dev enp0s3 2>/dev/null || true
     sleep 1
-fi
-
-if ping -c 2 8.8.8.8 &> /dev/null; then
-    echo "[OK] Conectividade confirmada!"
+    
+    if ping -c 2 8.8.8.8 &> /dev/null; then
+        echo "[OK] Conectividade restaurada!"
+    else
+        echo "[AVISO] Ainda sem internet. Script continuará, mas downloads podem falhar."
+    fi
 else
-    echo "[AVISO] Sem internet. Script continuará, mas pode falhar no download do template."
+    echo "[OK] Conectividade confirmada!"
 fi
 sleep 1
 
@@ -101,6 +102,7 @@ sleep 1
 # INSTALAÇÃO DO SERVIDOR APACHE
 # ----------------------------------------------
 echo "[WEB] Instalando e configurando o Apache..."
+echo "[WEB] Isso pode levar alguns minutos dependendo da conexão..."
 sleep 1
 
 apt-get install -y apache2 wget unzip || {
@@ -108,21 +110,34 @@ apt-get install -y apache2 wget unzip || {
     echo "Verifique se há conectividade com a internet."
     exit 1
 }
+
+echo "[WEB] Habilitando serviço Apache para iniciar no boot..."
 systemctl enable apache2
+echo "[WEB] Iniciando serviço Apache..."
 systemctl start apache2
+echo "[OK] Apache instalado e iniciado!"
+sleep 1
 
 # Baixa e publica um template HTML da Internet
+echo "[WEB] Preparando diretório do site..."
 rm -rf /var/www/html/*
-echo "[WEB] Baixando template da internet..."
+echo "[WEB] Baixando template HTML da internet..."
+echo "[WEB] URL: https://www.tooplate.com/zip-templates/2133_moso_interior.zip"
+sleep 1
 
-# Tenta baixar o template
-if wget -q --timeout=10 --tries=2 https://www.tooplate.com/zip-templates/2129_crispy_kitchen.zip -O /tmp/site.zip 2>/dev/null; then
+# Tenta baixar o template (usando template diferente)
+if wget -q --timeout=10 --tries=2 https://www.tooplate.com/zip-templates/2133_moso_interior.zip -O /tmp/site.zip 2>/dev/null; then
     echo "[OK] Template baixado com sucesso!"
+    echo "[WEB] Descompactando arquivos..."
     unzip -q /tmp/site.zip -d /tmp/site 2>/dev/null
+    echo "[WEB] Movendo arquivos para /var/www/html/..."
     mv /tmp/site/*/* /var/www/html/ 2>/dev/null || mv /tmp/site/* /var/www/html/ 2>/dev/null
+    echo "[WEB] Limpando arquivos temporários..."
     rm -rf /tmp/site /tmp/site.zip
+    echo "[OK] Template profissional publicado!"
 else
-    echo "[AVISO] Falha ao baixar template, usando página padrão..."
+    echo "[AVISO] Falha ao baixar template da internet."
+    echo "[WEB] Criando página HTML padrão personalizada..."
     cat > /var/www/html/index.html <<'HTMLEOF'
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -147,8 +162,10 @@ else
 </body>
 </html>
 HTMLEOF
+    echo "[OK] Página padrão criada!"
 fi
 
+echo "[WEB] Ajustando permissões dos arquivos..."
 chown -R www-data:www-data /var/www/html
 
 echo "[OK] Site publicado em http://$IP"
@@ -158,6 +175,7 @@ sleep 1
 # INSTALAÇÃO E CONFIGURAÇÃO DO DNS (BIND9)
 # ----------------------------------------------
 echo "[DNS] Instalando e configurando o Bind9..."
+echo "[DNS] Instalando pacotes necessários..."
 sleep 1
 
 apt-get install -y bind9 bind9utils bind9-doc dnsutils || {
@@ -165,6 +183,10 @@ apt-get install -y bind9 bind9utils bind9-doc dnsutils || {
     echo "Verifique se há conectividade com a internet."
     exit 1
 }
+
+echo "[OK] Pacotes do Bind9 instalados!"
+echo "[DNS] Configurando arquivo named.conf.options..."
+sleep 1
 
 # Arquivo /etc/bind/named.conf.options
 cat > /etc/bind/named.conf.options <<EOF
@@ -181,6 +203,10 @@ options {
 };
 EOF
 
+echo "[OK] Arquivo named.conf.options criado!"
+echo "[DNS] Configurando arquivo named.conf.local..."
+sleep 1
+
 # Arquivo /etc/bind/named.conf.local
 cat > /etc/bind/named.conf.local <<EOF
 zone "$DOMAIN" IN {
@@ -189,6 +215,10 @@ zone "$DOMAIN" IN {
     allow-transfer { any; };
 };
 EOF
+
+echo "[OK] Arquivo named.conf.local criado!"
+echo "[DNS] Criando arquivo de zona para o domínio $DOMAIN..."
+sleep 1
 
 # Criação do arquivo de zona
 cat > $ZONE_FILE <<EOF
@@ -211,14 +241,24 @@ mail    IN      A       $IP
 @       IN      MX 10   mail.$DOMAIN.
 EOF
 
+echo "[OK] Arquivo de zona criado!"
+echo "[DNS] Ajustando permissões..."
 chown bind:bind $ZONE_FILE
 
+echo "[DNS] Validando sintaxe do arquivo de zona..."
 # Verifica a zona antes de reiniciar
-named-checkzone $DOMAIN $ZONE_FILE
+if named-checkzone $DOMAIN $ZONE_FILE; then
+    echo "[OK] Arquivo de zona validado com sucesso!"
+else
+    echo "[ERRO] Erro na sintaxe do arquivo de zona!"
+    exit 1
+fi
 
+echo "[DNS] Reiniciando serviço Bind9..."
 # Reinicia o serviço DNS
 systemctl restart bind9 2>/dev/null || systemctl restart named 2>/dev/null || /etc/init.d/bind9 restart
 
+echo "[DNS] Habilitando Bind9 para iniciar no boot..."
 # Tenta habilitar o serviço (ignora erro se já estiver habilitado)
 systemctl enable bind9 2>/dev/null || systemctl enable named 2>/dev/null || true
 
@@ -228,8 +268,11 @@ sleep 1
 # ----------------------------------------------
 # CONFIGURAÇÃO DO FIREWALL (SE HOUVER)
 # ----------------------------------------------
-echo "[FIREWALL] Configurando regras..."
+echo "[FIREWALL] Verificando firewall..."
+sleep 1
+
 if command -v ufw &> /dev/null; then
+    echo "[FIREWALL] UFW detectado, configurando regras..."
     ufw allow 80/tcp
     ufw allow 53/tcp
     ufw allow 53/udp
@@ -258,10 +301,21 @@ echo ""
 echo "Ou adicione no /etc/hosts do cliente:"
 echo "   $IP www.$DOMAIN $DOMAIN"
 echo ""
-echo "Serviços ativos:"
-systemctl status apache2 --no-pager | grep Active
-systemctl status bind9 --no-pager | grep Active
+echo "=============================================="
+echo "Verificando status dos serviços..."
+echo "=============================================="
 echo ""
-echo "Testando DNS local:"
-nslookup www.$DOMAIN localhost
+echo "📊 Status do Apache:"
+systemctl status apache2 --no-pager 2>/dev/null | grep Active || /etc/init.d/apache2 status | grep running
+echo ""
+echo "📊 Status do Bind9:"
+systemctl status bind9 --no-pager 2>/dev/null | grep Active || systemctl status named --no-pager 2>/dev/null | grep Active || /etc/init.d/bind9 status | grep running
+echo ""
+echo "=============================================="
+echo "Testando DNS localmente..."
+echo "=============================================="
+nslookup www.$DOMAIN localhost || dig www.$DOMAIN @localhost
+echo ""
+echo "=============================================="
+echo "🎉 SERVIDOR PRONTO PARA USO!"
 echo "=============================================="
