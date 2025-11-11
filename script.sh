@@ -103,22 +103,50 @@ sleep 1
 echo "[WEB] Instalando e configurando o Apache..."
 sleep 1
 
-apt-get install -y apache2 wget unzip
+apt-get install -y apache2 wget unzip || {
+    echo "[ERRO] Falha ao instalar pacotes do Apache!"
+    echo "Verifique se há conectividade com a internet."
+    exit 1
+}
 systemctl enable apache2
 systemctl start apache2
 
 # Baixa e publica um template HTML da Internet
 rm -rf /var/www/html/*
 echo "[WEB] Baixando template da internet..."
-wget -q https://www.tooplate.com/zip-templates/2129_crispy_kitchen.zip -O /tmp/site.zip || {
-    echo "[AVISO] Falha ao baixar template, usando página padrão..."
-    echo "<h1>Servidor Web Apache - Gabriel.local</h1><p>Servidor configurado com sucesso!</p>" > /var/www/html/index.html
-}
 
-if [ -f /tmp/site.zip ]; then
-    unzip -q /tmp/site.zip -d /tmp/site
-    mv /tmp/site/*/* /var/www/html/ 2>/dev/null || mv /tmp/site/* /var/www/html/
+# Tenta baixar o template
+if wget -q --timeout=10 --tries=2 https://www.tooplate.com/zip-templates/2129_crispy_kitchen.zip -O /tmp/site.zip 2>/dev/null; then
+    echo "[OK] Template baixado com sucesso!"
+    unzip -q /tmp/site.zip -d /tmp/site 2>/dev/null
+    mv /tmp/site/*/* /var/www/html/ 2>/dev/null || mv /tmp/site/* /var/www/html/ 2>/dev/null
     rm -rf /tmp/site /tmp/site.zip
+else
+    echo "[AVISO] Falha ao baixar template, usando página padrão..."
+    cat > /var/www/html/index.html <<'HTMLEOF'
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Servidor Gabriel.local</title>
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+        h1 { font-size: 3em; margin-bottom: 20px; }
+        p { font-size: 1.5em; }
+        .info { background: rgba(255,255,255,0.1); padding: 20px; border-radius: 10px; margin-top: 30px; }
+    </style>
+</head>
+<body>
+    <h1>🚀 Servidor Web Apache</h1>
+    <p>Domínio: gabriel.local</p>
+    <div class="info">
+        <p>✅ Servidor configurado com sucesso!</p>
+        <p>📅 Data: $(date)</p>
+    </div>
+</body>
+</html>
+HTMLEOF
 fi
 
 chown -R www-data:www-data /var/www/html
@@ -132,7 +160,11 @@ sleep 1
 echo "[DNS] Instalando e configurando o Bind9..."
 sleep 1
 
-apt-get install -y bind9 bind9utils bind9-doc dnsutils
+apt-get install -y bind9 bind9utils bind9-doc dnsutils || {
+    echo "[ERRO] Falha ao instalar pacotes do Bind9!"
+    echo "Verifique se há conectividade com a internet."
+    exit 1
+}
 
 # Arquivo /etc/bind/named.conf.options
 cat > /etc/bind/named.conf.options <<EOF
@@ -185,8 +217,10 @@ chown bind:bind $ZONE_FILE
 named-checkzone $DOMAIN $ZONE_FILE
 
 # Reinicia o serviço DNS
-systemctl restart bind9
-systemctl enable bind9
+systemctl restart bind9 2>/dev/null || systemctl restart named 2>/dev/null || /etc/init.d/bind9 restart
+
+# Tenta habilitar o serviço (ignora erro se já estiver habilitado)
+systemctl enable bind9 2>/dev/null || systemctl enable named 2>/dev/null || true
 
 echo "[OK] DNS configurado para o domínio $DOMAIN"
 sleep 1
