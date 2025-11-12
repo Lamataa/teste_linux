@@ -2,26 +2,27 @@
 # ==============================================
 # Script de Automação - Servidor Web + DNS
 # Autor: Gabriel Lamata
-# Versão: SEM configuração de rede (para testes)
+# Versão: Completa com melhorias
 # ==============================================
 
-# Para o script em caso de erro
+# Para o script caso dê erro
 set -e
 
 # Variáveis do script
 DOMAIN="gabriel.local"
+IP="192.168.56.20"
+IFACE1="enp0s3"
 IFACE2="enp0s8"
 ZONE_FILE="/var/cache/bind/gabriel.local.zone"
 
-# Interação com usuário (requisito 1)
+# Pergunta pro usuário se quer continuar
 echo "=================================="
 echo "Script de Configuração Automática"
 echo "=================================="
 echo "Este script vai configurar:"
+echo "  - Rede (interfaces)"
 echo "  - Apache (servidor web)"
 echo "  - Bind9 (DNS)"
-echo ""
-echo "ATENÇÃO: Configure a rede manualmente antes!"
 echo ""
 read -p "Deseja continuar? (s/n): " CONFIRMAR
 
@@ -35,25 +36,35 @@ echo "Iniciando configuração do servidor..."
 sleep 2
 
 # ==========================================
-# DETECÇÃO DO IP
+# ETAPA 1: Configuração de Rede
 # ==========================================
-echo "[1/4] Detectando IP da interface $IFACE2..."
-IP=$(ip -4 addr show $IFACE2 | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -1)
+echo "[1/5] Configurando interfaces de rede..."
+echo "Criando arquivo /etc/network/interfaces..."
 
-if [ -z "$IP" ]; then
-    echo "ERRO: Interface $IFACE2 não configurada!"
-    echo "Configure a rede manualmente primeiro."
-    exit 1
-fi
+cat > /etc/network/interfaces <<EOF
+auto lo
+iface lo inet loopback
 
-echo "IP encontrado: $IP"
+auto $IFACE1
+iface $IFACE1 inet dhcp
+
+auto $IFACE2
+iface $IFACE2 inet static
+    address $IP
+    netmask 255.255.255.0
+EOF
+
+echo "Subindo interface $IFACE2..."
+ifup $IFACE2 2>/dev/null || true
+echo "Rede configurada com sucesso!"
+echo "IP atribuído: $IP"
 sleep 2
 
 # ==========================================
 # ETAPA 2: Atualização do Sistema
 # ==========================================
 echo ""
-echo "[2/4] Atualizando repositórios do sistema..."
+echo "[2/5] Atualizando repositórios do sistema..."
 echo "Comentando primeira linha do sources.list..."
 sed -i '1s/^/#/' /etc/apt/sources.list 2>/dev/null || true
 echo "Executando apt update..."
@@ -65,11 +76,39 @@ sleep 2
 # ETAPA 3: Instalação do Apache
 # ==========================================
 echo ""
-echo "[3/4] Instalando servidor web Apache..."
+echo "[3/5] Instalando servidor web Apache..."
 echo "Instalando pacotes: apache2, wget, unzip..."
 apt-get install -y apache2 wget unzip
+
+# ==========================================
+# NOVO: Configurando segurança do Apache
+# Ocultando a versão do Apache no cabeçalho HTTP
+# ==========================================
+echo ""
+echo "Configurando segurança - ocultando versão do Apache..."
+
+# Verifica se o arquivo de segurança existe
+if [ -f /etc/apache2/conf-available/security.conf ]; then
+    # Altera as configurações para ocultar versão
+    sed -i 's/^ServerTokens .*/ServerTokens Prod/' /etc/apache2/conf-available/security.conf
+    sed -i 's/^ServerSignature .*/ServerSignature Off/' /etc/apache2/conf-available/security.conf
+    echo "Versão do Apache ocultada com sucesso!"
+else
+    # Se não existir, adiciona no arquivo principal
+    echo "ServerTokens Prod" >> /etc/apache2/apache2.conf
+    echo "ServerSignature Off" >> /etc/apache2/apache2.conf
+    echo "Configurações de segurança adicionadas!"
+fi
+
+# ==========================================
+# NOVO: Habilitando Apache pra iniciar automaticamente
+# ==========================================
+echo ""
 echo "Habilitando Apache para iniciar no boot..."
 systemctl enable apache2
+echo "Apache configurado para iniciar automaticamente!"
+
+echo ""
 echo "Iniciando serviço Apache..."
 systemctl start apache2
 echo "Apache instalado e iniciado com sucesso!"
@@ -79,7 +118,7 @@ sleep 2
 # ETAPA 4: Download e Publicação do Site
 # ==========================================
 echo ""
-echo "[4/4] Baixando template HTML da internet..."
+echo "[4/5] Baixando template HTML da internet..."
 echo "Limpando diretório /var/www/html/..."
 rm -rf /var/www/html/*
 
@@ -159,10 +198,17 @@ chown bind:bind $ZONE_FILE
 echo "Validando configuração da zona DNS..."
 named-checkzone $DOMAIN $ZONE_FILE
 
-echo "Reiniciando serviço Bind9..."
-systemctl restart bind9 2>/dev/null || /etc/init.d/bind9 restart
+# ==========================================
+# NOVO: Habilitando Bind9 pra iniciar automaticamente
+# ==========================================
+echo ""
 echo "Habilitando Bind9 para iniciar no boot..."
 systemctl enable bind9 2>/dev/null || true
+echo "Bind9 configurado para iniciar automaticamente!"
+
+echo ""
+echo "Reiniciando serviço Bind9..."
+systemctl restart bind9 2>/dev/null || /etc/init.d/bind9 restart
 echo "DNS configurado com sucesso!"
 sleep 2
 
@@ -195,5 +241,29 @@ echo "Teste do DNS:"
 echo "=================================="
 nslookup www.$DOMAIN localhost || echo "DNS configurado (pode não resolver ainda no cliente)"
 echo ""
-echo "Configuração finalizada com sucesso!"
+
+# ==========================================
+# NOVO: Reiniciando o servidor automaticamente
+# ==========================================
 echo "=================================="
+echo "ATENÇÃO: O sistema vai reiniciar!"
+echo "=================================="
+echo ""
+echo "Reiniciando em 10 segundos..."
+echo "Pressione Ctrl+C para cancelar"
+echo ""
+
+# Contagem regressiva
+sleep 3
+echo "Reiniciando em 7 segundos..."
+sleep 3
+echo "Reiniciando em 4 segundos..."
+sleep 2
+echo "Reiniciando em 2 segundos..."
+sleep 2
+
+echo "Reiniciando o sistema agora..."
+echo ""
+
+# Reinicia o servidor
+reboot
